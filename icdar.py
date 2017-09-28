@@ -1,14 +1,25 @@
 import numpy as np
 import glob as glob
 import cv2
+import tensorflow as tf
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import time
 from keras.engine.training import GeneratorEnqueuer
 
+tf.app.flags.DEFINE_string('training_data_path', '/data/ocr/icdar2015/', 'training dataset to use')
+FLAGS = tf.app.flags.FLAGS
+
 
 def get_images():
+    files = []
+    for ext in ['jpg', 'png', 'jpeg', 'JPG']:
+        files.extend(glob.glob(os.path.join(FLAGS.training_data_path, '*.{}'.format(ext))))
+    return files
+
+
+def get_images__():
     """
 
     :return: training image files list
@@ -83,7 +94,7 @@ def check_and_validate_polys(polys, (h, w)):
     return np.array(validated_polys)
 
 
-def crop_area(im, polys, crop_background, max_tries=20):
+def crop_area(im, polys, crop_background, max_tries=50):
     """
     crop image randomly, if crop_background is True then crop an area that exclude text polys,
     if crop_background is False then crop an area include text polys, both try 50 times to crop image,
@@ -153,7 +164,9 @@ def generate_labels(im_size, polys):
     :return:
     """
     # TODO: add training mask like shrinked poly in EAST
+
     h, w = im_size
+    # auxiliary variable for caculating y_regr_label
     poly_mask = np.zeros((h, w), dtype=np.uint8)
     y_class_label = np.zeros((h, w), dtype=np.uint8)
     # y_regr_label = np.zeros((h, w, 8), dtype=np.uint8)
@@ -200,7 +213,7 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
     index = np.arange(0, image_arr.shape[0])
     print 'number of training images: {}'.format(len(index))
     while True:
-        # np.random.shuffle(index)
+        np.random.shuffle(index)
         for i in index:
             img_fname = image_arr[i]
             im = cv2.imread(img_fname)
