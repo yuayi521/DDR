@@ -7,9 +7,9 @@ import model
 import matplotlib.pyplot as plt
 
 
-tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/icdar2013/', '')
+tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/icdar2015/', '')
 tf.app.flags.DEFINE_string('gpu_list', '0', '')
-tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15', '')
+tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15/', '')
 tf.app.flags.DEFINE_string('output_path', '/home/yuquanjie/output_ocr/', '')
 FLAGS = tf.app.flags.FLAGS
 
@@ -76,7 +76,7 @@ def restore_rectangle(xy_text, geo_map):
     return np.array(text_box, dtype=np.float32)
 
 
-def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_thres=0.2):
+def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_thres=0.2, vis=False):
     """
     restore text boxes from score map and geo map
     :param score_map:
@@ -85,27 +85,23 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     :param score_map_thresh: threshhold for score map
     :param box_thresh: threshhold for boxes
     :param nms_thres: threshold for nms
+    :param vis:
     :return:
     """
+    # reduce dimension of score map and geo_map
     if len(score_map.shape) == 4:
         score_map = score_map[0, :, :, 0]
         geo_map = geo_map[0, :, :, ]
-    # ######## ?????????????????????????????????????????????????????????????? ############################
     # filter the score map
     xy_text = np.argwhere(score_map > score_map_thresh)
-    # plt.imshow(score_map)
-    # plt.show()
-    # ######## ?????????????????????????????????????????????????????????????? ############################
-    print 'score_map size {}, filtered score_map size {}'.format(score_map.shape[0] * score_map.shape[1],
-                                                                 xy_text.shape[0])
+    # visualize the score map
+    if vis:
+        plt.imshow(score_map)
+        plt.show()
     # sort the text boxes via the y axis
     xy_text = xy_text[np.argsort(xy_text[:, 0])]
     # restore
     start = time.time()
-
-    #
-    # text_box_restored = restore_rectangle(xy_text[:, ::-1]*4, geo_map[xy_text[:, 0], xy_text[:, 1], :]) # N*4*2
-    #
     text_box_restored = restore_rectangle(xy_text[:, ::-1] * 4, geo_map[xy_text[:, 0], xy_text[:, 1], :])  # N*4*2
 
     print '{} text boxes before nms'.format(text_box_restored.shape[0])
@@ -152,10 +148,8 @@ def main(argv=None):
         input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
         global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
         f_score, f_geometry = model.model(input_images, is_training=False)
-        # f_score, f_geometry = model.model(input_images, is_training=True)
         variable_averages = tf.train.ExponentialMovingAverage(0.997, global_step)
         saver = tf.train.Saver(variable_averages.variables_to_restore())
-        print variable_averages.variables_to_restore()
         with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
             ckpt_state = tf.train.get_checkpoint_state(FLAGS.checkpoint_path)
             model_path = os.path.join(FLAGS.checkpoint_path, os.path.basename(ckpt_state.model_checkpoint_path))
