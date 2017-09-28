@@ -132,7 +132,7 @@ def my_loss(y_true_cls, y_pred_cls, y_true_reg, y_pred_reg):
     # use czc's cls loss
     # loss_cls = dice_coefficient_remove_mask(y_true_cls, y_pred_cls)
     # scale the classification loss to match regression loss
-    # loss_cls *= 0.01
+    loss_cls *= 0.1
     tf.summary.scalar('classification_loss', loss_cls)
 
     abs_val = tf.abs(y_true_reg - y_pred_reg)
@@ -152,7 +152,7 @@ def my_loss(y_true_cls, y_pred_cls, y_true_reg, y_pred_reg):
     loss_reg = tf.reduce_mean(loss_reg)
     tf.summary.scalar('regression_loss', loss_reg)
 
-    loss_all = 0.01 * loss_reg + loss_cls
+    loss_all = loss_reg + loss_cls
 
     tf.summary.scalar('all_loss', loss_all)
 
