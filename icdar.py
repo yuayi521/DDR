@@ -19,20 +19,6 @@ def get_images():
     return files
 
 
-def get_images__():
-    """
-
-    :return: training image files list
-    """
-    # TODO data_dir can set as tf.app.flags
-    data_dir = '/data/ocr/icdar2015/'
-    # data_dir = '/data/ocr/special_case/'
-    files = []
-    for ext in ['jpg', 'JPG', 'png', 'jpeg']:
-        files.extend(glob.glob(data_dir + '*.{}'.format(ext)))
-    return files
-
-
 def load_annoatation(txt_fname):
     """
     read all text polys' 4 points coordinates, sotre in list text_polys
@@ -202,9 +188,11 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
     :param vis:
     :return:
     """
-    # input image, batch_size * 320 * 320 * 3
-    # classification label, batch_size * 80 * 80 * 1
-    # regression label, batch_size * 80 * 80 * 8
+
+    # define return variable ...
+    # input image,              batch_size * 320 * 320 * 3
+    # classification label,     batch_size * 80 * 80 * 1
+    # regression label,         batch_size * 80 * 80 * 8
     images = []
     y_class_labels = []
     y_regr_labels = []
@@ -361,9 +349,7 @@ def get_batch(num_workers=10, **kwargs):
             enqueuer.stop()
 
 if __name__ == '__main__':
-    # pass
     gen = generator(input_size=320, batch_size=14 * 3, vis=False)
     for ii in gen:
         print len(ii)
-        print 'batch is over ------------------------------------------------'
 
