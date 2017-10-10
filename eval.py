@@ -5,9 +5,10 @@ import numpy as np
 import tensorflow as tf
 import model
 import matplotlib.pyplot as plt
+import locality_aware_nms as nms_locality
 
-
-tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/icdar2015/', '')
+# tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/icdar2015/', '')
+tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/ch4/', '')
 tf.app.flags.DEFINE_string('gpu_list', '0', '')
 tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15/', '')
 tf.app.flags.DEFINE_string('output_path', '/home/yuquanjie/output_ocr/', '')
@@ -100,37 +101,38 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
         plt.show()
     # sort the text boxes via the y axis
     xy_text = xy_text[np.argsort(xy_text[:, 0])]
-    # restore
+    # restore text boxes from score_map and geo_map
     start = time.time()
     text_box_restored = restore_rectangle(xy_text[:, ::-1] * 4, geo_map[xy_text[:, 0], xy_text[:, 1], :])  # N*4*2
-
     print '{} text boxes before nms'.format(text_box_restored.shape[0])
-    boxes = text_box_restored
-    points = xy_text[:, ::-1] * 4
 
-    #
-    # boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
-    # boxes[:, :8] = text_box_restored.reshape((-1, 8))
-    # boxes[:, 8] = score_map[xy_text[:, 0], xy_text[:, 1]]
+    # boxes = text_box_restored
+    # score_map greater than threshold(0.8)
+    # points = xy_text[:, ::-1] * 4
+
+    boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
+    boxes[:, :8] = text_box_restored.reshape((-1, 8))
+    boxes[:, 8] = score_map[xy_text[:, 0], xy_text[:, 1]]
     timer['restore'] = time.time() - start
 
     # nms part
-    # start = time.time()
-    # boxes = nms_locality.nms_locality(boxes.astype(np.float64), nms_thres)
-    # timer['nms'] = time.time() - start
+    start = time.time()
+    boxes = nms_locality.nms_locality(boxes.astype(np.float64), nms_thres)
+    timer['nms'] = time.time() - start
 
     if boxes.shape[0] == 0:
-        # return None, timer
-        return None, None, timer
+        return None, timer
+        # return None, None, timer
 
     # here we filter some low score boxes by the average score map, this is different from the orginal paper
-    # for i, box in enumerate(boxes):
-    #     mask = np.zeros_like(score_map, dtype=np.uint8)
-    #     cv2.fillPoly(mask, box[:8].reshape((-1, 4, 2)).astype(np.int32)/4, 1)
-    #     boxes[i, 8] = cv2.mean(score_map, mask)[0]
-    # boxes = boxes[boxes[:, 8] > box_thresh]
+    for i, box in enumerate(boxes):
+        mask = np.zeros_like(score_map, dtype=np.uint8)
+        cv2.fillPoly(mask, box[:8].reshape((-1, 4, 2)).astype(np.int32) / 4, 1)
+        boxes[i, 8] = cv2.mean(score_map, mask)[0]
+    boxes = boxes[boxes[:, 8] > box_thresh]
 
-    return boxes, points.astype(np.float32), timer
+    # return boxes, points.astype(np.float32), timer
+    return boxes, timer
 
 
 def sort_poly(p):
@@ -164,7 +166,8 @@ def main(argv=None):
                 start = time.time()
                 score, geometry = sess.run([f_score, f_geometry], feed_dict={input_images: [im_resized]})
                 timer['net'] = time.time() - start
-                boxes, points, timer = detect(score_map=score, geo_map=geometry, timer=timer)
+                # boxes, points, timer = detect(score_map=score, geo_map=geometry, timer=timer)
+                boxes, timer = detect(score_map=score, geo_map=geometry, timer=timer)
                 print '{} : net {:.0f}ms, restore {:.0f}ms, nms {:.0f}ms'.format(
                     im_fn, timer['net'] * 1000, timer['restore'] * 1000, timer['nms'] * 1000)
                 if boxes is not None:
@@ -178,20 +181,20 @@ def main(argv=None):
                             'w') as f:
                         for box in boxes:
                             # to avoid submitting errors
-                            # box = sort_poly(box.astype(np.int32))
-                            # if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3]-box[0]) < 5:
-                            #     continue
+                            box = sort_poly(box.astype(np.int32))
+                            if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3]-box[0]) < 5:
+                                continue
                             f.write('{},{},{},{},{},{},{},{}\r\n'.format(
                                 box[0, 0], box[0, 1], box[1, 0], box[1, 1], box[2, 0], box[2, 1], box[3, 0], box[3, 1],
                             ))
                             cv2.polylines(im[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True,
                                           color=(255, 255, 0), thickness=1)
-                            break
+                            # break
 
-                        points[:, 0] /= ratio_w
-                        points[:, 1] /= ratio_h
-                        for point in points:
-                             cv2.circle(im[:, :, ::-1], (point[0], point[1]), 1, color=(255, 0, 0))
+                        # points[:, 0] /= ratio_w
+                        # points[:, 1] /= ratio_h
+                        # for point in points:
+                        #     cv2.circle(im[:, :, ::-1], (point[0], point[1]), 1, color=(255, 0, 0))
                 cv2.imwrite(os.path.join(FLAGS.output_path, os.path.basename(im_fn)), im[:, :, ::-1])
 
 
