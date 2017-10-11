@@ -13,7 +13,7 @@ tf.app.flags.DEFINE_float('learning_rate', 0.0001, '')
 tf.app.flags.DEFINE_integer('max_steps', 100000, '')
 tf.app.flags.DEFINE_float('moving_average_decay', 0.997, '')
 tf.app.flags.DEFINE_string('gpu_list', '1,2,3', '')
-tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15/', '')
+tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15_shrinkedpoly/', '')
 tf.app.flags.DEFINE_boolean('restore', False, 'whether to resotre from checkpoint')
 tf.app.flags.DEFINE_integer('save_checkpoint_steps', 1000, '')
 tf.app.flags.DEFINE_integer('save_summary_steps', 100, '')
@@ -23,14 +23,14 @@ FLAGS = tf.app.flags.FLAGS
 gpus = list(range(len(FLAGS.gpu_list.split(','))))
 
 
-# def tower_loss(images, score_maps, geo_maps, training_masks, reuse_variables=None):
-def tower_loss(images, score_maps, geo_maps, reuse_variables=None):
+# def tower_loss(images, score_maps, geo_maps, reuse_variables=None):
+def tower_loss(images, score_maps, geo_maps, training_masks, reuse_variables=None):
     # Build inference graph
     with tf.variable_scope(tf.get_variable_scope(), reuse=reuse_variables):
         f_score, f_geometry = model.model(images, is_training=True)
 
-    # model_loss = model.loss(score_maps, f_score, geo_maps, f_geometry, training_masks)
-    model_loss = model.my_loss(score_maps, f_score, geo_maps, f_geometry)
+    model_loss = model.loss(score_maps, f_score, geo_maps, f_geometry, training_masks)
+    # model_loss = model.loss(score_maps, f_score, geo_maps, f_geometry)
     total_loss = tf.add_n([model_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
 
     # add summary
@@ -40,7 +40,7 @@ def tower_loss(images, score_maps, geo_maps, reuse_variables=None):
         tf.summary.image('score_map_pred', f_score)
         tf.summary.image('geo_map_0', geo_maps[:, :, :, 0:1])
         tf.summary.image('geo_map_0_pred', f_geometry[:, :, :, 0:1])
-        # tf.summary.image('training_masks', training_masks)
+        tf.summary.image('training_masks', training_masks)
         tf.summary.scalar('model_loss', model_loss)
         tf.summary.scalar('total_loss', total_loss)
 
@@ -77,7 +77,7 @@ def main(argv=None):
     input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
     input_score_maps = tf.placeholder(tf.float32, shape=[None, None, None, 1], name='input_score_maps')
     input_geo_maps = tf.placeholder(tf.float32, shape=[None, None, None, 8], name='input_geo_maps')
-    # input_training_masks = tf.placeholder(tf.float32, shape=[None, None, None, 1], name='input_training_masks')
+    input_training_masks = tf.placeholder(tf.float32, shape=[None, None, None, 1], name='input_training_masks')
 
     global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
     learning_rate = tf.train.exponential_decay(FLAGS.learning_rate, global_step, decay_steps=10000, decay_rate=0.94, staircase=True)
@@ -89,7 +89,7 @@ def main(argv=None):
     input_images_split = tf.split(input_images, len(gpus))
     input_score_maps_split = tf.split(input_score_maps, len(gpus))
     input_geo_maps_split = tf.split(input_geo_maps, len(gpus))
-    # input_training_masks_split = tf.split(input_training_masks, len(gpus))
+    input_training_masks_split = tf.split(input_training_masks, len(gpus))
 
     tower_grads = []
     reuse_variables = None
@@ -99,9 +99,9 @@ def main(argv=None):
                 iis = input_images_split[i]
                 isms = input_score_maps_split[i]
                 igms = input_geo_maps_split[i]
-                # itms = input_training_masks_split[i]
-                # total_loss, model_loss = tower_loss(iis, isms, igms, itms, reuse_variables)
-                total_loss, model_loss = tower_loss(iis, isms, igms, reuse_variables)
+                itms = input_training_masks_split[i]
+                total_loss, model_loss = tower_loss(iis, isms, igms, itms, reuse_variables)
+                # total_loss, model_loss = tower_loss(iis, isms, igms, reuse_variables)
                 batch_norm_updates_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope))
                 reuse_variables = True
 
@@ -145,10 +145,10 @@ def main(argv=None):
         start = time.time()
         for step in range(FLAGS.max_steps):
             data = next(data_generator)
-            # data = data_generator.next()
             ml, tl, _ = sess.run([model_loss, total_loss, train_op], feed_dict={input_images: data[0],
                                                                                 input_score_maps: data[1],
-                                                                                input_geo_maps: data[2]})
+                                                                                input_geo_maps: data[2],
+                                                                                input_training_masks: data[3]})
             if np.isnan(tl):
                 print('Loss diverged, stop training')
                 break
@@ -166,7 +166,8 @@ def main(argv=None):
             if step % FLAGS.save_summary_steps == 0:
                 _, tl, summary_str = sess.run([train_op, total_loss, summary_op], feed_dict={input_images: data[0],
                                                                                              input_score_maps: data[1],
-                                                                                             input_geo_maps: data[2]})
+                                                                                             input_geo_maps: data[2],
+                                                                                             input_training_masks: data[3]})
                 summary_writer.add_summary(summary_str, global_step=step)
 
 if __name__ == '__main__':
