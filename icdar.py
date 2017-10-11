@@ -9,6 +9,7 @@ import time
 from keras.engine.training import GeneratorEnqueuer
 
 tf.app.flags.DEFINE_string('training_data_path', '/data/ocr/icdar2015/', 'training dataset to use')
+tf.app.flags.DEFINE_integer('min_text_size', 10, 'if the text size is smaller than this, we ignore it during training')
 FLAGS = tf.app.flags.FLAGS
 
 
@@ -142,6 +143,73 @@ def crop_area(im, polys, crop_background, max_tries=50):
     return im, polys
 
 
+def shrink_poly(poly, r):
+    """
+    fit a poly inside the origin poly, maybe bugs here...
+    used for generate the score map
+    :param poly: the text poly
+    :param r: r in the paper
+    :return: the shrinked poly
+    """
+    # shrink ratio
+    R = 0.3
+    # find the longer pair
+    if np.linalg.norm(poly[0] - poly[1]) + np.linalg.norm(poly[2] - poly[3]) > \
+                    np.linalg.norm(poly[0] - poly[3]) + np.linalg.norm(poly[1] - poly[2]):
+        # first move (p0, p1), (p2, p3), then (p0, p3), (p1, p2)
+        ## p0, p1
+        theta = np.arctan2((poly[1][1] - poly[0][1]), (poly[1][0] - poly[0][0]))
+        poly[0][0] += R * r[0] * np.cos(theta)
+        poly[0][1] += R * r[0] * np.sin(theta)
+        poly[1][0] -= R * r[1] * np.cos(theta)
+        poly[1][1] -= R * r[1] * np.sin(theta)
+        ## p2, p3
+        theta = np.arctan2((poly[2][1] - poly[3][1]), (poly[2][0] - poly[3][0]))
+        poly[3][0] += R * r[3] * np.cos(theta)
+        poly[3][1] += R * r[3] * np.sin(theta)
+        poly[2][0] -= R * r[2] * np.cos(theta)
+        poly[2][1] -= R * r[2] * np.sin(theta)
+        ## p0, p3
+        theta = np.arctan2((poly[3][0] - poly[0][0]), (poly[3][1] - poly[0][1]))
+        poly[0][0] += R * r[0] * np.sin(theta)
+        poly[0][1] += R * r[0] * np.cos(theta)
+        poly[3][0] -= R * r[3] * np.sin(theta)
+        poly[3][1] -= R * r[3] * np.cos(theta)
+        ## p1, p2
+        theta = np.arctan2((poly[2][0] - poly[1][0]), (poly[2][1] - poly[1][1]))
+        poly[1][0] += R * r[1] * np.sin(theta)
+        poly[1][1] += R * r[1] * np.cos(theta)
+        poly[2][0] -= R * r[2] * np.sin(theta)
+        poly[2][1] -= R * r[2] * np.cos(theta)
+    else:
+        ## p0, p3
+        # print poly
+        theta = np.arctan2((poly[3][0] - poly[0][0]), (poly[3][1] - poly[0][1]))
+        poly[0][0] += R * r[0] * np.sin(theta)
+        poly[0][1] += R * r[0] * np.cos(theta)
+        poly[3][0] -= R * r[3] * np.sin(theta)
+        poly[3][1] -= R * r[3] * np.cos(theta)
+        ## p1, p2
+        theta = np.arctan2((poly[2][0] - poly[1][0]), (poly[2][1] - poly[1][1]))
+        poly[1][0] += R * r[1] * np.sin(theta)
+        poly[1][1] += R * r[1] * np.cos(theta)
+        poly[2][0] -= R * r[2] * np.sin(theta)
+        poly[2][1] -= R * r[2] * np.cos(theta)
+        ## p0, p1
+        theta = np.arctan2((poly[1][1] - poly[0][1]), (poly[1][0] - poly[0][0]))
+        poly[0][0] += R * r[0] * np.cos(theta)
+        poly[0][1] += R * r[0] * np.sin(theta)
+        poly[1][0] -= R * r[1] * np.cos(theta)
+        poly[1][1] -= R * r[1] * np.sin(theta)
+        ## p2, p3
+        theta = np.arctan2((poly[2][1] - poly[3][1]), (poly[2][0] - poly[3][0]))
+        poly[3][0] += R * r[3] * np.cos(theta)
+        poly[3][1] += R * r[3] * np.sin(theta)
+        poly[2][0] -= R * r[2] * np.cos(theta)
+        poly[2][1] -= R * r[2] * np.sin(theta)
+    return poly
+
+
 def generate_labels(im_size, polys):
     """
     according to text polys calculating classification label and regression label
@@ -149,23 +217,34 @@ def generate_labels(im_size, polys):
     :param polys:
     :return:
     """
-    # TODO: add training mask like shrinked poly in EAST
 
     h, w = im_size
     # auxiliary variable for caculating y_regr_label
     poly_mask = np.zeros((h, w), dtype=np.uint8)
     y_class_label = np.zeros((h, w), dtype=np.uint8)
-    # y_regr_label = np.zeros((h, w, 8), dtype=np.uint8)
     y_regr_label = np.zeros((h, w, 8), dtype=np.int32)
+    # mask used during traning, to ignore some "DON'T CARE AREA" areas, weight or height less than 10 pixel
+    training_mask = np.ones((h, w), dtype=np.uint8)
+
     for poly_idx, poly in enumerate(polys):
-        # 1) generate classification label
         poly = np.round(poly).astype(np.int32)
-        cv2.fillPoly(y_class_label, [poly], 1)
-        cv2.fillPoly(poly_mask, [poly], poly_idx + 1)
+        # shrink the poly
+        r = [None, None, None, None]
+        for i in range(4):
+            r[i] = min(np.linalg.norm(poly[i] - poly[(i + 1) % 4]), np.linalg.norm(poly[i] - poly[(i - 1) % 4]))
+        shrinked_poly = shrink_poly(poly.copy(), r).astype(np.int32)[np.newaxis, :, :]
+        # 1) generate classification label using shrinked poly
+        cv2.fillPoly(y_class_label, [shrinked_poly], 1)
+        cv2.fillPoly(poly_mask, [shrinked_poly], poly_idx + 1)
+        # if the poly is too small, then ignore it during training
+        poly_h = min(np.linalg.norm(poly[0] - poly[3]), np.linalg.norm(poly[1] - poly[2]))
+        poly_w = min(np.linalg.norm(poly[0] - poly[1]), np.linalg.norm(poly[2] - poly[3]))
+        if min(poly_h, poly_w) < FLAGS.min_text_size:
+            cv2.fillPoly(training_mask, poly.astype(np.int32)[np.newaxis, :, :], 0)
 
         # store the y,x coordinates in text polys for calculating y_regr_label
         yx_in_txtpolys = np.argwhere(poly_mask == poly_idx + 1)
-        # 2) generate regression label
+        # 2) generate regression label using raw poly
         for y, x in yx_in_txtpolys:
             y_regr_label[y, x, 0] = poly[0, 0] - x
             y_regr_label[y, x, 1] = poly[0, 1] - y
@@ -175,7 +254,7 @@ def generate_labels(im_size, polys):
             y_regr_label[y, x, 5] = poly[2, 1] - y
             y_regr_label[y, x, 6] = poly[3, 0] - x
             y_regr_label[y, x, 7] = poly[3, 1] - y
-    return y_class_label, y_regr_label
+    return y_class_label, y_regr_label, training_mask
 
 
 def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacle=np.array([0.5, 1, 2, 3]), vis=False):
@@ -188,20 +267,18 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
     :param vis:
     :return:
     """
-
-    # define return variable ...
-    # input image,              batch_size * 320 * 320 * 3
-    # classification label,     batch_size * 80 * 80 * 1
-    # regression label,         batch_size * 80 * 80 * 8
-    images = []
-    y_class_labels = []
-    y_regr_labels = []
-
     image_arr = np.array(get_images())
     index = np.arange(0, image_arr.shape[0])
     print 'number of training images: {}'.format(len(index))
     while True:
-        np.random.shuffle(index)
+        np.random.shuffle(index)    # define return variable ...
+        # input image,              batch_size * 320 * 320 * 3
+        # classification label,     batch_size * 80 * 80 * 1
+        # regression label,         batch_size * 80 * 80 * 8
+        images = []
+        y_class_labels = []
+        y_regr_labels = []
+        training_masks = []
         for i in index:
             img_fname = image_arr[i]
             im = cv2.imread(img_fname)
@@ -236,6 +313,7 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
                 # set the classification label and regression label
                 y_class_label = np.zeros((input_size, input_size), dtype=np.uint8)
                 y_regr_lable = np.zeros((input_size, input_size, 8), dtype=np.uint8)
+                training_mask = np.ones((input_size, input_size), dtype=np.uint8)
             else:
                 # cropped area include text poly
                 im, text_polys = crop_area(im, text_polys, crop_background=False)
@@ -256,13 +334,13 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
                 text_polys[:, :, 0] *= x_axis_ration
                 text_polys[:, :, 1] *= y_axis_ration
                 # set the classification label and regression label
-                y_class_label, y_regr_lable = generate_labels((input_size, input_size), text_polys)
+                y_class_label, y_regr_lable, training_mask = generate_labels((input_size, input_size), text_polys)
 
             if vis:
                 if 0:
                     img_path = os.path.join('/data/ocr/train_data/', os.path.basename(img_fname))
                     cv2.imwrite(img_path, im[:, :, ::1])
-                fig, axs = plt.subplots(5, 2, figsize=(10, 20))
+                fig, axs = plt.subplots(4, 2, figsize=(10, 20))
                 axs[0, 0].imshow(im[:, :, ::-1])
                 axs[0, 0].set_xticks([])
                 axs[0, 0].set_yticks([])
@@ -297,21 +375,9 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
                 axs[2, 1].set_xticks([])
                 axs[2, 1].set_yticks([])
 
-                axs[3, 0].imshow(y_regr_lable[::, ::, 4])
+                axs[3, 0].imshow(training_mask[::, ::])
                 axs[3, 0].set_xticks([])
                 axs[3, 0].set_yticks([])
-
-                axs[3, 1].imshow(y_regr_lable[::, ::, 5])
-                axs[3, 1].set_xticks([])
-                axs[3, 1].set_yticks([])
-
-                axs[4, 0].imshow(y_regr_lable[::, ::, 6])
-                axs[4, 0].set_xticks([])
-                axs[4, 0].set_yticks([])
-
-                axs[4, 1].imshow(y_regr_lable[::, ::, 7])
-                axs[4, 1].set_xticks([])
-                axs[4, 1].set_yticks([])
 
                 plt.tight_layout()
                 plt.show()
@@ -320,13 +386,15 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
             images.append(im[:, :, ::-1].astype(np.float32))
             y_class_labels.append(y_class_label[::4, ::4, np.newaxis].astype(np.float32))
             y_regr_labels.append(y_regr_lable[::4, ::4, :].astype(np.float32))
+            training_masks.append(training_mask[::4, ::4, np.newaxis].astype(np.float32))
 
             if len(images) == batch_size:
-                yield images, y_class_labels, y_regr_labels
+                yield images, y_class_labels, y_regr_labels, training_masks
                 # set the list to empty
                 images = []
                 y_class_labels = []
                 y_regr_labels = []
+                training_masks = []
 
 
 def get_batch(num_workers=10, **kwargs):
@@ -349,7 +417,7 @@ def get_batch(num_workers=10, **kwargs):
             enqueuer.stop()
 
 if __name__ == '__main__':
-    gen = generator(input_size=320, batch_size=14 * 3, vis=False)
+    gen = generator(input_size=320, batch_size=14 * 3, vis=True)
     for ii in gen:
         print len(ii)
 
