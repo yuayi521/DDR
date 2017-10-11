@@ -122,24 +122,6 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     return boxes, timer
 
 
-def sort_poly(p):
-    """
-
-    Args:
-        p:
-
-    Returns:
-
-    """
-    # calculate value predicted text box's 4 points' x added y, then get the minimal value's index
-    min_axis = np.argmin(np.sum(p, axis=1))
-    p = p[[min_axis, (min_axis + 1) % 4, (min_axis + 2) % 4, (min_axis + 3) % 4]]
-    if abs(p[0, 0] - p[1, 0]) > abs(p[0, 1] - p[1, 1]):
-        return p
-    else:
-        return p[[0, 3, 2, 1]]
-
-
 def main(argv=None):
     os.environ['CUDA_VISIBLE_DEVICES'] = FLAGS.gpu_list
     with tf.get_default_graph().as_default():
@@ -174,7 +156,6 @@ def main(argv=None):
                     with open(os.path.join(FLAGS.output_path, 'res_{}.txt'.format(os.path.basename(im_fn).split('.')[0])), 'w') as f:
                         for box in boxes:
                             # to avoid submitting errors
-                            # box = sort_poly(box.astype(np.int32))
                             box = box.astype(np.int32)
                             if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3]-box[0]) < 5:
                                 continue
