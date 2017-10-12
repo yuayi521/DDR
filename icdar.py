@@ -8,7 +8,7 @@ import matplotlib.patches as patches
 import time
 from keras.engine.training import GeneratorEnqueuer
 
-tf.app.flags.DEFINE_string('training_data_path', '/data/ocr/icdar2015/', 'training dataset to use')
+tf.app.flags.DEFINE_string('training_data_path', '/data/ocr/icdar13_15/', 'training dataset to use')
 tf.app.flags.DEFINE_integer('min_text_size', 10, 'if the text size is smaller than this, we ignore it during training')
 FLAGS = tf.app.flags.FLAGS
 
