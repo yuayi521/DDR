@@ -10,7 +10,8 @@ import locality_aware_nms as nms_locality
 tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/ch4/', '')
 # tf.app.flags.DEFINE_string('test_data_path', '/data/ocr/sp_case/', '')
 tf.app.flags.DEFINE_string('gpu_list', '0', '')
-tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15_shrinkedpoly/', '')
+# tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar15_shrinkedpoly/', '')
+tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/ddr_icdar13_15/', '')
 tf.app.flags.DEFINE_string('output_path', '/home/yuquanjie/output_ocr/', '')
 FLAGS = tf.app.flags.FLAGS
 
@@ -77,7 +78,7 @@ def restore_rectangle(xy_text, geo_map):
     return np.array(text_box, dtype=np.float32)
 
 
-def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_thres=0.2, vis=False):
+def detect(score_map, geo_map, timer, score_map_thresh=0.9, box_thresh=0.1, nms_thres=0.2, vis=False):
     """
     restore text boxes from score map and geo map
     :param score_map:
