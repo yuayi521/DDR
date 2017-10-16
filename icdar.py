@@ -20,7 +20,7 @@ def get_images():
     return files
 
 
-def load_annoatation(txt_fname):
+def get_textpolys_from_text(txt_fname):
     """
     read all text polys' 4 points coordinates, sotre in list text_polys
     :param txt_fname:
@@ -53,7 +53,7 @@ def polygon_area(poly):
     return np.sum(edge) / 2.
 
 
-def check_and_validate_polys(polys, (h, w)):
+def gurantee_polys_point_clockwise(polys, (h, w)):
     """
     copy czc's code
     check so that the text poly is in the same direction(clock-wise),
@@ -95,15 +95,12 @@ def crop_area(im, polys, crop_background, max_tries=50):
     # TODO min_crop_side_ration can set as tf.app.flags
     min_crop_side_ratio = 0.1
     h, w, _ = im.shape
-    h_array = np.zeros(h, dtype=np.int32)
-    w_array = np.zeros(w, dtype=np.int32)
+    h_array, w_array = np.zeros(h, dtype=np.int32), np.zeros(w, dtype=np.int32)
     # set the range of text polys' x,y coordinates in w_array and h_array is 1
     for poly in polys:
         poly = np.round(poly).astype(np.int32)
-        ymin = np.min(poly[:, 1])
-        ymax = np.max(poly[:, 1])
-        xmin = np.min(poly[:, 0])
-        xmax = np.max(poly[:, 0])
+        ymin, ymax = np.min(poly[:, 1]), np.max(poly[:, 1])
+        xmin, xmax = np.min(poly[:, 0]), np.max(poly[:, 0])
         h_array[ymin:ymax] = 1
         w_array[xmin:xmax] = 1
     # ensure the cropped area not across text polys
@@ -114,8 +111,13 @@ def crop_area(im, polys, crop_background, max_tries=50):
         return im, polys
 
     for i in xrange(max_tries):
-        yy = np.random.choice(h_axis, 2)
-        xx = np.random.choice(w_axis, 2)
+        random_bool = False
+        if random_bool:
+            yy = np.random.choice(h_axis, 2)
+            xx = np.random.choice(w_axis, 2)
+        else:
+            yy = h_axis[0], h_axis[len(h_axis) / 2]
+            xx = w_axis[0], w_axis[len(w_axis) / 2]
         x_min_carea = np.min(xx)
         x_max_carea = np.max(xx)
         y_min_carea = np.min(yy)
@@ -210,6 +212,22 @@ def shrink_poly(poly, r):
     return poly
 
 
+def textpolycoord_multiply_scalefactor(polys, scale_factor):
+    polys *= scale_factor
+    return polys
+
+
+def zoom_in_out_image_randomly(im, polys, scale_factor_arr):
+    s_factor = np.random.choice(scale_factor_arr)
+    im_scaled = cv2.resize(im, dsize=None, fx=s_factor, fy=s_factor)
+
+    # update text_polys's x,y coordinates using rd_scale
+    # polys *= s_factor
+
+    polys_scaled = textpolycoord_multiply_scalefactor(polys, s_factor)
+    return im_scaled, polys_scaled
+
+
 def generate_labels(im_size, polys):
     """
     according to text polys calculating classification label and regression label
@@ -257,48 +275,32 @@ def generate_labels(im_size, polys):
     return y_class_label, y_regr_label, training_mask
 
 
-def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacle=np.array([0.5, 1, 2, 3]), vis=False):
-    """
+# def generator(input_size=320, batch_size=32, background_ration=3./8, scale_factor=np.array([0.5, 1, 2, 3]), vis=False):
+def generator(input_size=320, batch_size=32, background_ration=0, scale_factor=np.array([0.5]), vis=False):
 
-    :param input_size:
-    :param batch_size:
-    :param background_ration:
-    :param random_sacle:
-    :param vis:
-    :return:
-    """
     image_arr = np.array(get_images())
     index = np.arange(0, image_arr.shape[0])
     print 'number of training images: {}'.format(len(index))
     while True:
-        np.random.shuffle(index)    # define return variable ...
-        # input image,              batch_size * 320 * 320 * 3
-        # classification label,     batch_size * 80 * 80 * 1
-        # regression label,         batch_size * 80 * 80 * 8
+        # np.random.shuffle(index)
         images = []
         y_class_labels = []
         y_regr_labels = []
         training_masks = []
         for i in index:
-            img_fname = image_arr[i]
-            im = cv2.imread(img_fname)
-            h, w, _ = im.shape
-            txt_fname = img_fname.replace(os.path.basename(img_fname).split('.')[-1], 'txt')
-            if not os.path.exists(txt_fname):
+            img_file_name = image_arr[i]
+            img = cv2.imread(img_file_name)
+            h, w, _ = img.shape
+            txt_file_name = img_file_name.replace(os.path.basename(img_file_name).split('.')[-1], 'txt')
+            if not os.path.exists(txt_file_name):
                 continue
-            text_polys = load_annoatation(txt_fname)
-            # validate the points is clock-wise
-            text_polys = check_and_validate_polys(text_polys, (h, w))
+            text_polys = gurantee_polys_point_clockwise(get_textpolys_from_text(txt_file_name), (h, w))
 
             # 2 steps(random scale, random crop) image preprocessing
-            # 1) scale image randomly
-            if True:
-                rd_scale = np.random.choice(random_sacle)
-                im = cv2.resize(im, dsize=None, fx=rd_scale, fy=rd_scale)
-                # update text_polys's x,y coordinates using rd_scale
-                text_polys *= rd_scale
+            im, text_polys = zoom_in_out_image_randomly(img, text_polys, scale_factor)
             # 2) crop image randomly
-            if np.random.rand() < background_ration:
+            # if np.random.rand() < background_ration:
+            if False:
                 # cropped area is background
                 im, text_polys = crop_area(im, text_polys, crop_background=True)
                 if text_polys.shape[0] > 0:
@@ -338,7 +340,7 @@ def generator(input_size=320, batch_size=32, background_ration=3./8, random_sacl
 
             if vis:
                 if 0:
-                    img_path = os.path.join('/data/ocr/train_data/', os.path.basename(img_fname))
+                    img_path = os.path.join('/data/ocr/train_data/', os.path.basename(img_file_name))
                     cv2.imwrite(img_path, im[:, :, ::1])
                 fig, axs = plt.subplots(4, 2, figsize=(10, 20))
                 axs[0, 0].imshow(im[:, :, ::-1])
@@ -417,7 +419,38 @@ def get_batch(num_workers=10, **kwargs):
             enqueuer.stop()
 
 if __name__ == '__main__':
-    gen = generator(input_size=320, batch_size=14 * 3, vis=True)
+    gen = generator(input_size=320, batch_size=200, vis=False)
+    write = False
+    if write:
+        for ii in gen:
+            images, y_cls_label, y_regr_label, masks = ii
+            # write the file into disk
+            np.save('/tmp/1', images)
+            np.save('/tmp/2', y_cls_label)
+            np.save('/tmp/3', y_regr_label)
+            np.save('/tmp/4', masks)
+            break
+    print 'OVer ........'
+
     for ii in gen:
-        print len(ii)
+        images, y_cls_label, y_regr_label, masks = ii
+        images_wri = np.load('/tmp/1.npy', 'r')
+        y_cls_label_wri = np.load('/tmp/2.npy', 'r')
+        y_regr_label_wri = np.load('/tmp/3.npy', 'r')
+        masks_wri = np.load('/tmp/4.npy', 'r')
+
+        if np.array_equal(images, images_wri) and np.array_equal(y_cls_label, y_cls_label_wri) and \
+                np.array_equal(y_regr_label, y_regr_label_wri) and np.array_equal(masks, masks_wri):
+            print '\nOK......'
+        else:
+            print '\nwrong.....'
+
+        break
+
+
+
+
+
+
+
 
